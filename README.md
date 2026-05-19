@@ -14,19 +14,16 @@ Attention For Partially Filled Attention Masks"](https://arxiv.org/abs/2409.1509
 
 ## Efficiently Dispatching FlashAttention For Partially Filled Attention Masks
 
-BinFlash adds a cheap precomputation that
+BinFlash adds a preprocessing that
 reduces the full `(N, N)` bool mask to a coarse `(N/BM × N/BN)` block mask
-plus a 32-bit-packed fine mask. The inner kernel iterates over a
-*pre-sorted* list of non-empty K-blocks per Q-row, runs the "all-True"
-blocks with zero mask load, and applies the packed mask only for partial
+plus a 32-bit-packed fine mask. The inner kernel iterates over a pre-sorted list of non-empty K-blocks per Q-row, runs the "all-True"
+blocks with zero mask loading, and applies the packed mask only for partial
 blocks. All-False blocks are skipped entirely.
 
-The dispatch picks between `BM=64/128` and `BN=64/128` tiles (with or
-without the packed-mask path) based on density, gap ratio, and partial
+The dispatch picks tries to autotune tiling, density, gap ratio, and partial
 fraction measured on the coarse block mask. Backward uses two passes
 (dKdV over K-blocks, dQ over Q-blocks) with the same gathered-dispatch
-machinery; the dQ tile is further gated to `BM=128 BN=32` for dense
-patterns at large N.
+machinery.
 
 ## Install
 
@@ -61,7 +58,7 @@ Inputs:
 - `q`, `k`, `v`: `(B, H, N, D)`, `D in {16, 32, 64, 128}`, dtype fp16/bf16.
 - `mask`: `(N, N)` bool tensor on the same CUDA device, `True` = attend.
 - `sm_scale`: optional softmax scale; defaults to `1 / sqrt(D)`.
-- `precise`: optional bool, default `False`. When `True`, applies log2e post-matmul in fp32 and uses fp16 P@V / dV / dK matmuls. Lowers forward max-error by ~25% and dK/dV by ~10% on our test grid at a few percent latency cost; dQ is tied.
+- `precise`: optional bool, default `False`. When `True`, applies log2e post-matmul in fp32 and uses fp16 P@V / dV / dK matmuls. Lowers forward max-error by ~25% and dK/dV by ~10% at some cost to latency.
 - `approximate_softmax` + `softmax_threshold`: optional. When `approximate_softmax=True`, the kernel applies BLASST-style content-based block skipping ([arXiv:2512.12087](https://arxiv.org/abs/2512.12087)).
 
 For inference, wrap in `torch.no_grad()` to skip ctx saves.
