@@ -20,7 +20,7 @@ plus a 32-bit-packed fine mask. The inner kernel iterates over a pre-sorted list
 blocks with zero mask loading, and applies the packed mask only for partial
 blocks. All-False blocks are skipped entirely.
 
-The dispatch picks tries to autotune tiling, density, gap ratio, and partial
+The dispatcher tries to autotune tiling based on density, gap ratio, and partial
 fraction measured on the coarse block mask. Backward uses two passes
 (dKdV over K-blocks, dQ over Q-blocks) with the same gathered-dispatch
 machinery.
