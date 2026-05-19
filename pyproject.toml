@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "binflash"
+version = "0.1.0"
+description = "Flash attention with binary block-mask skipping for sparse attention patterns."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+  { name = "Jonas Geiping", email = "jonas@tue.ellis.eu" },
+]
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.4",
+  "triton>=3.0",
+]
+
+[project.optional-dependencies]
+benchmark = [
+  "tqdm>=4.66",
+]
+dev = [
+  "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/JonasGeiping/binflash"
+
+[tool.setuptools.packages.find]
+include = ["binflash*"]
+exclude = ["tests*", "benchmarks*"]
+
+[tool.ruff]
+line-length = 140
+
+[tool.ruff.lint]
+ignore = [
+  "E402",
+  "E501",
+  "E741",
+  "B007",
+  "B011",
+]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
