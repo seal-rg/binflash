@@ -5,9 +5,10 @@ patterns (causal, sliding window, block-diagonal, prefix LM, longformer,
 log-tree, document masks, etc.). Triton kernels with forward and backward
 support; drop-in replacement for `F.scaled_dot_product_attention` in all situations where an `(N, N)` bool mask is given.
 
-Notably, the interface is strictly tensor-> tensor, there is no pre-compilation per mask required.
+Notably, the interface is strictly tensor-> tensor, there is no pre-compilation per mask required, it's just 
+`out = binflash_attention(q, k, v, mask)`. 
 
-This is a cleanup and a small usability update of our code for ["Efficiently Dispatching Flash
+This is a (model-assisted!) cleanup and a small usability update of our code for ["Efficiently Dispatching Flash
 Attention For Partially Filled Attention Masks"](https://arxiv.org/abs/2409.15097)
 (Sharma & Geiping, NeurIPS ENLSP Workshop 2024).
 
@@ -60,8 +61,8 @@ Inputs:
 - `q`, `k`, `v`: `(B, H, N, D)`, `D in {16, 32, 64, 128}`, dtype fp16/bf16.
 - `mask`: `(N, N)` bool tensor on the same CUDA device, `True` = attend.
 - `sm_scale`: optional softmax scale; defaults to `1 / sqrt(D)`.
-- `precise`: optional bool, default `False`. When `True`, applies log2e post-matmul in fp32 (instead of baking it into the q/k prescale) and uses fp16 P@V / dV / dK matmuls. Lowers forward max-error by ~25% and dK/dV by ~10% on our test grid at a few percent latency cost; dQ is tied.
-- `approximate_softmax` + `softmax_threshold`: optional. When `approximate_softmax=True`, the kernel applies BLASST-style content-based block skipping ([arXiv:2512.12087](https://arxiv.org/abs/2512.12087)): after computing `qk` for a K-block, if every Q-row in the tile would receive a softmax contribution smaller than `softmax_threshold` (default `1e-4`) times the running max, the V load and P@V matmul for that block are skipped. The backward applies the same test against the saved LSE — strictly tighter than the forward's running max, so it skips a *superset* of the forward's blocks and gradients stay consistent with what was actually computed. This is an **approximate** op (small contributions are dropped on purpose); on workloads with content-based sparsity (long-context attention with a few dominant K-positions) it can give meaningful speedup. On dense random workloads the skip rarely fires.
+- `precise`: optional bool, default `False`. When `True`, applies log2e post-matmul in fp32 and uses fp16 P@V / dV / dK matmuls. Lowers forward max-error by ~25% and dK/dV by ~10% on our test grid at a few percent latency cost; dQ is tied.
+- `approximate_softmax` + `softmax_threshold`: optional. When `approximate_softmax=True`, the kernel applies BLASST-style content-based block skipping ([arXiv:2512.12087](https://arxiv.org/abs/2512.12087)).
 
 For inference, wrap in `torch.no_grad()` to skip ctx saves.
 
@@ -78,10 +79,6 @@ python benchmarks/benchmark_bwd.py --csv bwd.csv
 # Subset a few methods:
 python benchmarks/benchmark.py --methods binflash flex --csv fwd_only.csv
 ```
-
-The benchmark workload (`patterns × seq_lens × workloads`) is fixed in code
-so version-to-version comparisons stay honest. Edit `benchmark.py` if you
-need a different sweep.
 
 ## Citation
 

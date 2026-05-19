@@ -29,9 +29,9 @@ _preparse_gpu()
 import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 import triton  # noqa: E402
+from benchmark import MASK_FACTORIES, _save_csv  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
-from benchmark import MASK_FACTORIES, _save_csv  # noqa: E402
 from binflash import binflash_attention  # noqa: E402
 from binflash.flex_attention_impl import flex_attention_from_mask  # noqa: E402
 from binflash.masks import mask_sparsity  # noqa: E402

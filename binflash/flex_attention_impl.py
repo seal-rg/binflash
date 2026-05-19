@@ -3,9 +3,10 @@
 import torch  # type: ignore
 from torch.nn.attention.flex_attention import (  # type: ignore
     create_block_mask,
+)
+from torch.nn.attention.flex_attention import (
     flex_attention as _flex_attention,
 )
-
 
 # Pre-compile flex_attention for best performance.
 # `mode="max-autotune-no-cudagraphs"` is recommended by PyTorch FlexAttention
@@ -47,12 +48,16 @@ def flex_attention_from_mask(
     if block_mask is None:
         # mask_mod closure over the dense mask tensor.
         m = mask
+
         def mask_mod(b, h, q_idx, kv_idx):
             return m[q_idx, kv_idx]
+
         block_mask = create_block_mask(
             mask_mod,
-            B=None, H=None,
-            Q_LEN=N, KV_LEN=N,
+            B=None,
+            H=None,
+            Q_LEN=N,
+            KV_LEN=N,
             device=q.device,
             BLOCK_SIZE=block_size,
         )
@@ -63,7 +68,9 @@ def flex_attention_from_mask(
     kernel_options = _FLEX_KERNEL_OPTIONS if D > 64 else None
 
     return _compiled_flex(
-        q, k, v,
+        q,
+        k,
+        v,
         block_mask=block_mask,
         scale=sm_scale,
         kernel_options=kernel_options,
@@ -184,12 +191,8 @@ def make_flex_wrapper():
             def mask_mod(b, h, q_idx, kv_idx):
                 return mask[q_idx, kv_idx]
 
-            cache[key] = create_block_mask(
-                mask_mod, B=None, H=None, Q_LEN=N, KV_LEN=N, device=q.device
-            )
-        return _compiled_flex(
-            q, k, v, block_mask=cache[key], scale=sm_scale, kernel_options=_FLEX_KERNEL_OPTIONS
-        )
+            cache[key] = create_block_mask(mask_mod, B=None, H=None, Q_LEN=N, KV_LEN=N, device=q.device)
+        return _compiled_flex(q, k, v, block_mask=cache[key], scale=sm_scale, kernel_options=_FLEX_KERNEL_OPTIONS)
 
     return wrapper
 
@@ -212,34 +215,46 @@ def symbolic_mask_mod_for(pattern: str, N: int):
     produced by the corresponding MASK_FACTORIES entry in masks.py.
     """
     if pattern == "causal":
+
         def m(b, h, q, kv):
             return q >= kv
+
         return m
     if pattern == "sliding_window_128":
         W = 128
+
         def m(b, h, q, kv):
             return ((q - kv) <= W) & ((kv - q) <= W)
+
         return m
     if pattern == "causal_window_256":
         W = 256
+
         def m(b, h, q, kv):
             return (q >= kv) & ((q - kv) <= W)
+
         return m
     if pattern == "block_diagonal_128":
         BS = 128
+
         def m(b, h, q, kv):
             return (q // BS) == (kv // BS)
+
         return m
     if pattern == "prefix_lm_quarter":
         P = N // 4
+
         def m(b, h, q, kv):
             return (kv < P) | (q >= kv)
+
         return m
     if pattern == "longformer_128_16":
         W = 128
         G = 16
+
         def m(b, h, q, kv):
             return (((q - kv) <= W) & ((kv - q) <= W)) | (q < G) | (kv < G)
+
         return m
     return None
 
@@ -276,12 +291,8 @@ def make_symbolic_flex_wrapper():
         if key not in cache:
             N = mask.shape[0]
             mask_mod = _resolve_mask_mod(mask)
-            cache[key] = create_block_mask(
-                mask_mod, B=None, H=None, Q_LEN=N, KV_LEN=N, device=q.device
-            )
-        return _compiled_flex(
-            q, k, v, block_mask=cache[key], scale=sm_scale, kernel_options=_FLEX_KERNEL_OPTIONS
-        )
+            cache[key] = create_block_mask(mask_mod, B=None, H=None, Q_LEN=N, KV_LEN=N, device=q.device)
+        return _compiled_flex(q, k, v, block_mask=cache[key], scale=sm_scale, kernel_options=_FLEX_KERNEL_OPTIONS)
 
     def preproc(mask, q, k, v, sm_scale):
         N = mask.shape[0]

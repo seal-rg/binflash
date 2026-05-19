@@ -578,17 +578,13 @@ def _dispatch_and_preprocess(mask: torch.Tensor, D: int):
     return col_indices, n_full, n_total, mask_packed, 128, 64, use_packed
 
 
-
 # ─── Preprocessing: per-row delta = sum(dO * O) ───
 # v51: autotune over BLOCK_M, num_warps, num_stages. Memory-bound kernel; bigger
 # tiles reduce program-launch overhead. dKdV/dQ inner loop reads delta per row,
 # so BM here is independent of dkdv's BM.
 
 _preproc_autotune_configs = [
-    triton.Config({"BLOCK_M": bm}, num_stages=ns, num_warps=nw)
-    for bm in [64, 128, 256]
-    for ns in [1, 2, 3]
-    for nw in [4, 8]
+    triton.Config({"BLOCK_M": bm}, num_stages=ns, num_warps=nw) for bm in [64, 128, 256] for ns in [1, 2, 3] for nw in [4, 8]
 ]
 
 
@@ -598,9 +594,17 @@ def _bwd_preprocess_kernel(
     Out,
     DO,
     Delta,
-    stride_oz, stride_oh, stride_om, stride_on,
-    stride_doz, stride_doh, stride_dom, stride_don,
-    H, N_CTX, Z_TIMES_H,  # noqa: ARG001  (Z_TIMES_H used by @triton.autotune key)
+    stride_oz,
+    stride_oh,
+    stride_om,
+    stride_on,
+    stride_doz,
+    stride_doh,
+    stride_dom,
+    stride_don,
+    H,
+    N_CTX,
+    Z_TIMES_H,  # noqa: ARG001  (Z_TIMES_H used by @triton.autotune key)
     BLOCK_M: tl.constexpr,
     HEAD_DIM: tl.constexpr,
 ):
@@ -621,7 +625,7 @@ def _bwd_preprocess_kernel(
 # ─── Autotune configs for bwd kernels (mirror fwd's _autotune_configs) ───
 
 _bwd_autotune_configs = []
-for _s in [1, 2, 3]:           # D=128 bwd won't fit >3 stages in SMEM
+for _s in [1, 2, 3]:  # D=128 bwd won't fit >3 stages in SMEM
     for _w in [4, 8]:
         for _mnr in [None, 168, 192]:
             _kw = {}
@@ -630,23 +634,33 @@ for _s in [1, 2, 3]:           # D=128 bwd won't fit >3 stages in SMEM
             _bwd_autotune_configs.append(triton.Config({}, num_stages=_s, num_warps=_w, **_kw))
 
 
-
 # ─── dK, dV inner loop (K-outer, Q-inner — "transposed fwd") ───
+
 
 @triton.jit
 def _bwd_dkdv_inner(
-    dk, dv,
-    k_scaled, v,
-    Q_base, DO_base,
-    Mask_base, MaskPacked_base,
-    LSE, Delta,
-    stride_qm, stride_qk,
-    stride_dom, stride_don,
-    stride_mask_m, stride_mask_n,
-    stride_mp_m, stride_mp_n,
+    dk,
+    dv,
+    k_scaled,
+    v,
+    Q_base,
+    DO_base,
+    Mask_base,
+    MaskPacked_base,
+    LSE,
+    Delta,
+    stride_qm,
+    stride_qk,
+    stride_dom,
+    stride_don,
+    stride_mask_m,
+    stride_mask_n,
+    stride_mp_m,
+    stride_mp_n,
     off_hz,
     ri_base,
-    n_full, n_total,
+    n_full,
+    n_total,
     start_n,
     log2_threshold,
     BLOCK_M: tl.constexpr,
@@ -760,23 +774,52 @@ def _bwd_dkdv_inner(
 )
 @triton.jit
 def _bwd_dkdv_kernel(
-    Q, K, V, sm_scale,
-    DO, DK, DV,
+    Q,
+    K,
+    V,
+    sm_scale,
+    DO,
+    DK,
+    DV,
     Mask,
     MaskPacked,
-    LSE, Delta,
-    RowIndicesKT, NFullKT, NTotalKT,
+    LSE,
+    Delta,
+    RowIndicesKT,
+    NFullKT,
+    NTotalKT,
     log2_threshold,
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vk, stride_vn,
-    stride_doz, stride_doh, stride_dom, stride_don,
-    stride_dkz, stride_dkh, stride_dkn, stride_dkk,
-    stride_dvz, stride_dvh, stride_dvk, stride_dvn,
-    stride_mask_m, stride_mask_n,
-    stride_mp_m, stride_mp_n,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vz,
+    stride_vh,
+    stride_vk,
+    stride_vn,
+    stride_doz,
+    stride_doh,
+    stride_dom,
+    stride_don,
+    stride_dkz,
+    stride_dkh,
+    stride_dkn,
+    stride_dkk,
+    stride_dvz,
+    stride_dvh,
+    stride_dvk,
+    stride_dvn,
+    stride_mask_m,
+    stride_mask_n,
+    stride_mp_m,
+    stride_mp_n,
     stride_ri_row,
-    H, N_CTX,
+    H,
+    N_CTX,
     Z_TIMES_H,  # noqa: ARG001  (used by @triton.autotune key)
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -829,18 +872,37 @@ def _bwd_dkdv_kernel(
     ri_base = RowIndicesKT + start_n * stride_ri_row
 
     dk, dv = _bwd_dkdv_inner(
-        dk, dv, k_scaled, v,
-        Q + qvk_offset_q, DO + qvk_offset_do,
-        Mask, MaskPacked,
-        LSE, Delta,
-        stride_qm, stride_qk,
-        stride_dom, stride_don,
-        stride_mask_m, stride_mask_n,
-        stride_mp_m, stride_mp_n,
-        off_hz, ri_base,
-        n_full, n_total, start_n,
+        dk,
+        dv,
+        k_scaled,
+        v,
+        Q + qvk_offset_q,
+        DO + qvk_offset_do,
+        Mask,
+        MaskPacked,
+        LSE,
+        Delta,
+        stride_qm,
+        stride_qk,
+        stride_dom,
+        stride_don,
+        stride_mask_m,
+        stride_mask_n,
+        stride_mp_m,
+        stride_mp_n,
+        off_hz,
+        ri_base,
+        n_full,
+        n_total,
+        start_n,
         log2_threshold,
-        BLOCK_M, BLOCK_N, HEAD_DIM, N_CTX, USE_PACKED, PRECISE, APPROX_SOFTMAX,
+        BLOCK_M,
+        BLOCK_N,
+        HEAD_DIM,
+        N_CTX,
+        USE_PACKED,
+        PRECISE,
+        APPROX_SOFTMAX,
     )
 
     dk = dk * sm_scale
@@ -867,19 +929,29 @@ def _bwd_dkdv_kernel(
 
 # ─── dQ inner loop (Q-outer, K-inner — direct port of fwd) ───
 
+
 @triton.jit
 def _bwd_dq_inner(
     dq,
-    q_scaled, do,
-    K_base, V_base,
-    Mask_base, MaskPacked_base,
-    lse_i, d_i,
-    stride_kk, stride_kn,
-    stride_vk, stride_vn,
-    stride_mask_m, stride_mask_n,
-    stride_mp_m, stride_mp_n,
+    q_scaled,
+    do,
+    K_base,
+    V_base,
+    Mask_base,
+    MaskPacked_base,
+    lse_i,
+    d_i,
+    stride_kk,
+    stride_kn,
+    stride_vk,
+    stride_vn,
+    stride_mask_m,
+    stride_mask_n,
+    stride_mp_m,
+    stride_mp_n,
     ci_base,
-    n_full, n_total,
+    n_full,
+    n_total,
     start_m,
     log2_threshold,
     BLOCK_M: tl.constexpr,
@@ -966,22 +1038,47 @@ def _bwd_dq_inner(
 )
 @triton.jit
 def _bwd_dq_kernel(
-    Q, K, V, sm_scale,
-    DO, DQ,
+    Q,
+    K,
+    V,
+    sm_scale,
+    DO,
+    DQ,
     Mask,
     MaskPacked,
-    LSE, Delta,
-    ColIndices, NFull, NTotal,
+    LSE,
+    Delta,
+    ColIndices,
+    NFull,
+    NTotal,
     log2_threshold,
-    stride_qz, stride_qh, stride_qm, stride_qk,
-    stride_kz, stride_kh, stride_kn, stride_kk,
-    stride_vz, stride_vh, stride_vk, stride_vn,
-    stride_doz, stride_doh, stride_dom, stride_don,
-    stride_dqz, stride_dqh, stride_dqm, stride_dqk,
-    stride_mask_m, stride_mask_n,
-    stride_mp_m, stride_mp_n,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vz,
+    stride_vh,
+    stride_vk,
+    stride_vn,
+    stride_doz,
+    stride_doh,
+    stride_dom,
+    stride_don,
+    stride_dqz,
+    stride_dqh,
+    stride_dqm,
+    stride_dqk,
+    stride_mask_m,
+    stride_mask_n,
+    stride_mp_m,
+    stride_mp_n,
     stride_ci_row,
-    H, N_CTX,
+    H,
+    N_CTX,
     Z_TIMES_H,  # noqa: ARG001  (used by @triton.autotune key)
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -1036,18 +1133,34 @@ def _bwd_dq_kernel(
     ci_base = ColIndices + start_m * stride_ci_row
 
     dq = _bwd_dq_inner(
-        dq, q_scaled, do,
-        K + qvk_offset_k, V + qvk_offset_v,
-        Mask, MaskPacked,
-        lse_i, d_i,
-        stride_kk, stride_kn,
-        stride_vk, stride_vn,
-        stride_mask_m, stride_mask_n,
-        stride_mp_m, stride_mp_n,
+        dq,
+        q_scaled,
+        do,
+        K + qvk_offset_k,
+        V + qvk_offset_v,
+        Mask,
+        MaskPacked,
+        lse_i,
+        d_i,
+        stride_kk,
+        stride_kn,
+        stride_vk,
+        stride_vn,
+        stride_mask_m,
+        stride_mask_n,
+        stride_mp_m,
+        stride_mp_n,
         ci_base,
-        n_full, n_total, start_m,
+        n_full,
+        n_total,
+        start_m,
         log2_threshold,
-        BLOCK_M, BLOCK_N, HEAD_DIM, USE_PACKED, PRECISE, APPROX_SOFTMAX,
+        BLOCK_M,
+        BLOCK_N,
+        HEAD_DIM,
+        USE_PACKED,
+        PRECISE,
+        APPROX_SOFTMAX,
     )
 
     dq = dq * sm_scale
@@ -1078,8 +1191,10 @@ _ag_cache_val = None
 
 @triton.jit
 def _compute_bwd_block_mask_kernel(
-    Mask, BlockMask,
-    stride_mask_m, stride_mask_n,
+    Mask,
+    BlockMask,
+    stride_mask_m,
+    stride_mask_n,
     stride_bm_m,
     BM_COARSE: tl.constexpr,
     BN_CHUNKS: tl.constexpr,
@@ -1097,8 +1212,8 @@ def _compute_bwd_block_mask_kernel(
     tile = tl.load(tile_ptrs)
     tile_3d = tl.reshape(tile, (BM_COARSE, BN_CHUNKS, BLOCK_N))
     tile_i32 = tile_3d.to(tl.int32)
-    sum_col = tl.sum(tile_i32, axis=0)        # (BN_CHUNKS, BLOCK_N)
-    coarse_sums = tl.sum(sum_col, axis=1)     # (BN_CHUNKS,)
+    sum_col = tl.sum(tile_i32, axis=0)  # (BN_CHUNKS, BLOCK_N)
+    coarse_sums = tl.sum(sum_col, axis=1)  # (BN_CHUNKS,)
     has_any = coarse_sums > 0
     has_all = coarse_sums == (BM_COARSE * BLOCK_N)
     bm_val = has_any.to(tl.int8) + has_all.to(tl.int8)
@@ -1123,8 +1238,10 @@ def _compute_bwd_block_mask(mask, block_m, block_n):
         bn_chunks //= 2
     grid = (nqb, nkb // bn_chunks)
     _compute_bwd_block_mask_kernel[grid](
-        mask, block_mask,
-        mask.stride(0), mask.stride(1),
+        mask,
+        block_mask,
+        mask.stride(0),
+        mask.stride(1),
         block_mask.stride(0),
         BM_COARSE=block_m,
         BN_CHUNKS=bn_chunks,
@@ -1140,9 +1257,7 @@ def _autograd_preproc(mask, D):
     if key == _ag_cache_key:
         return _ag_cache_val
 
-    col_indices_fwd, n_full_fwd, n_total_fwd, mask_packed_fwd, chosen_bm, chosen_bn, use_packed = (
-        _dispatch_and_preprocess(mask, D)
-    )
+    col_indices_fwd, n_full_fwd, n_total_fwd, mask_packed_fwd, chosen_bm, chosen_bn, use_packed = _dispatch_and_preprocess(mask, D)
 
     N = mask.shape[0]
     bwd_block_mask = _compute_bwd_block_mask(mask, _BWD_BLOCK_M, _BWD_BLOCK_N)
@@ -1160,7 +1275,7 @@ def _autograd_preproc(mask, D):
     else:
         mask_packed_bwd = torch.empty((N // 32, N), dtype=torch.int32, device=mask.device).T
         _mask_i32 = mask.view(N, N // 32, 32).to(torch.int32)
-        _bit_weights = (1 << torch.arange(32, device=mask.device, dtype=torch.int32))
+        _bit_weights = 1 << torch.arange(32, device=mask.device, dtype=torch.int32)
         torch.sum(_mask_i32 * _bit_weights, dim=-1, out=mask_packed_bwd)
 
     # v26: work-ratio metric. BM=128 dQ halves program count at zero flop cost for
@@ -1172,14 +1287,24 @@ def _autograd_preproc(mask, D):
     work_ratio = visits_128 / max(visits_64, 1)
 
     val = {
-        "col_indices_fwd": col_indices_fwd, "n_full_fwd": n_full_fwd, "n_total_fwd": n_total_fwd,
-        "mask_packed_fwd": mask_packed_fwd, "chosen_bm": chosen_bm, "chosen_bn": chosen_bn,
+        "col_indices_fwd": col_indices_fwd,
+        "n_full_fwd": n_full_fwd,
+        "n_total_fwd": n_total_fwd,
+        "mask_packed_fwd": mask_packed_fwd,
+        "chosen_bm": chosen_bm,
+        "chosen_bn": chosen_bn,
         "use_packed": use_packed,
-        "col_indices_bwd": col_indices_bwd, "n_full_bwd": n_full_bwd, "n_total_bwd": n_total_bwd,
-        "row_indices_kt": row_indices_kt, "n_full_kt": n_full_kt, "n_total_kt": n_total_kt,
+        "col_indices_bwd": col_indices_bwd,
+        "n_full_bwd": n_full_bwd,
+        "n_total_bwd": n_total_bwd,
+        "row_indices_kt": row_indices_kt,
+        "n_full_kt": n_full_kt,
+        "n_total_kt": n_total_kt,
         "mask_packed_bwd": mask_packed_bwd,
         # v22: BM=128 BN=32 dQ dispatch path
-        "col_indices_dq": col_indices_dq, "n_full_dq": n_full_dq, "n_total_dq": n_total_dq,
+        "col_indices_dq": col_indices_dq,
+        "n_full_dq": n_full_dq,
+        "n_total_dq": n_total_dq,
         # v26: work-ratio gate
         "work_ratio_dq": work_ratio,
     }
@@ -1190,14 +1315,23 @@ def _autograd_preproc(mask, D):
 
 # ─── Fwd that returns LSE (for the autograd wrapper) ───
 
+
 def _binflash_fwd_with_lse(
-    q, k, v, mask, sm_scale, preproc=None, precise=False,
-    approximate_softmax=False, softmax_threshold=1e-4,
+    q,
+    k,
+    v,
+    mask,
+    sm_scale,
+    preproc=None,
+    precise=False,
+    approximate_softmax=False,
+    softmax_threshold=1e-4,
 ):
     import math
+
     B, H, N, D = q.shape
     if sm_scale is None:
-        sm_scale = D ** -0.5
+        sm_scale = D**-0.5
 
     if preproc is None:
         preproc = _autograd_preproc(mask, D)
@@ -1226,18 +1360,39 @@ def _binflash_fwd_with_lse(
         mp_stride_0, mp_stride_1 = mp_tensor.stride(0), mp_tensor.stride(1)
 
     _gathered_fwd[grid](
-        q, k, v, sm_scale, o, mask, mp_tensor,
-        col_indices, n_full, n_total, lse,
+        q,
+        k,
+        v,
+        sm_scale,
+        o,
+        mask,
+        mp_tensor,
+        col_indices,
+        n_full,
+        n_total,
+        lse,
         log2_threshold,
-        q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-        k.stride(2), k.stride(3),
-        v.stride(2), v.stride(3),
-        o.stride(2), o.stride(3),
-        mask.stride(0), mask.stride(1),
-        mp_stride_0, mp_stride_1,
+        q.stride(0),
+        q.stride(1),
+        q.stride(2),
+        q.stride(3),
+        k.stride(2),
+        k.stride(3),
+        v.stride(2),
+        v.stride(3),
+        o.stride(2),
+        o.stride(3),
+        mask.stride(0),
+        mask.stride(1),
+        mp_stride_0,
+        mp_stride_1,
         col_indices.stride(0),
-        H, N, B * H,
-        HEAD_DIM=D, BLOCK_M=chosen_bm, BLOCK_N=chosen_bn,
+        H,
+        N,
+        B * H,
+        HEAD_DIM=D,
+        BLOCK_M=chosen_bm,
+        BLOCK_N=chosen_bn,
         USE_PACKED=use_packed,
         PRECISE=precise,
         APPROX_SOFTMAX=approximate_softmax,
@@ -1247,11 +1402,23 @@ def _binflash_fwd_with_lse(
 
 # ─── Bwd Python entry ───
 
+
 def _binflash_bwd(
-    do, q, k, v, o, lse, mask, sm_scale, preproc=None, precise=False,
-    approximate_softmax=False, softmax_threshold=1e-4,
+    do,
+    q,
+    k,
+    v,
+    o,
+    lse,
+    mask,
+    sm_scale,
+    preproc=None,
+    precise=False,
+    approximate_softmax=False,
+    softmax_threshold=1e-4,
 ):
     import math
+
     B, H, N, D = q.shape
     assert N % _BWD_BLOCK_M == 0
     assert N % _BWD_BLOCK_N == 0
@@ -1277,10 +1444,20 @@ def _binflash_bwd(
     # v51: autotuned preproc; grid uses BLOCK_M from autotune
     grid_pre = lambda META: (triton.cdiv(N, META["BLOCK_M"]), B * H)  # noqa: E731
     _bwd_preprocess_kernel[grid_pre](
-        o, do, delta,
-        o.stride(0), o.stride(1), o.stride(2), o.stride(3),
-        do.stride(0), do.stride(1), do.stride(2), do.stride(3),
-        H, N, B * H,
+        o,
+        do,
+        delta,
+        o.stride(0),
+        o.stride(1),
+        o.stride(2),
+        o.stride(3),
+        do.stride(0),
+        do.stride(1),
+        do.stride(2),
+        do.stride(3),
+        H,
+        N,
+        B * H,
         HEAD_DIM=D,
     )
 
@@ -1303,20 +1480,56 @@ def _binflash_bwd(
 
     grid_dkdv = (triton.cdiv(N, _BWD_BLOCK_N), B * H)
     _bwd_dkdv_kernel[grid_dkdv](
-        q, k, v, sm_scale, do, dk, dv, mask, mask_packed, lse, delta,
-        row_indices_kt, n_full_kt, n_total_kt,
+        q,
+        k,
+        v,
+        sm_scale,
+        do,
+        dk,
+        dv,
+        mask,
+        mask_packed,
+        lse,
+        delta,
+        row_indices_kt,
+        n_full_kt,
+        n_total_kt,
         log2_threshold,
-        q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-        k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-        v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-        do.stride(0), do.stride(1), do.stride(2), do.stride(3),
-        dk.stride(0), dk.stride(1), dk.stride(2), dk.stride(3),
-        dv.stride(0), dv.stride(1), dv.stride(2), dv.stride(3),
-        mask.stride(0), mask.stride(1),
-        mask_packed.stride(0), mask_packed.stride(1),
+        q.stride(0),
+        q.stride(1),
+        q.stride(2),
+        q.stride(3),
+        k.stride(0),
+        k.stride(1),
+        k.stride(2),
+        k.stride(3),
+        v.stride(0),
+        v.stride(1),
+        v.stride(2),
+        v.stride(3),
+        do.stride(0),
+        do.stride(1),
+        do.stride(2),
+        do.stride(3),
+        dk.stride(0),
+        dk.stride(1),
+        dk.stride(2),
+        dk.stride(3),
+        dv.stride(0),
+        dv.stride(1),
+        dv.stride(2),
+        dv.stride(3),
+        mask.stride(0),
+        mask.stride(1),
+        mask_packed.stride(0),
+        mask_packed.stride(1),
         row_indices_kt.stride(0),
-        H, N, B * H,
-        BLOCK_M=_BWD_BLOCK_M, BLOCK_N=_BWD_BLOCK_N, HEAD_DIM=D,
+        H,
+        N,
+        B * H,
+        BLOCK_M=_BWD_BLOCK_M,
+        BLOCK_N=_BWD_BLOCK_N,
+        HEAD_DIM=D,
         USE_PACKED=USE_PACKED,
         PRECISE=precise,
         APPROX_SOFTMAX=approximate_softmax,
@@ -1324,19 +1537,51 @@ def _binflash_bwd(
 
     grid_dq = (triton.cdiv(N, dq_bm), B * H)
     _bwd_dq_kernel[grid_dq](
-        q, k, v, sm_scale, do, dq, mask, mask_packed, lse, delta,
-        col_indices_dq, n_full_dq, n_total_dq,
+        q,
+        k,
+        v,
+        sm_scale,
+        do,
+        dq,
+        mask,
+        mask_packed,
+        lse,
+        delta,
+        col_indices_dq,
+        n_full_dq,
+        n_total_dq,
         log2_threshold,
-        q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-        k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-        v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-        do.stride(0), do.stride(1), do.stride(2), do.stride(3),
-        dq.stride(0), dq.stride(1), dq.stride(2), dq.stride(3),
-        mask.stride(0), mask.stride(1),
-        mask_packed.stride(0), mask_packed.stride(1),
+        q.stride(0),
+        q.stride(1),
+        q.stride(2),
+        q.stride(3),
+        k.stride(0),
+        k.stride(1),
+        k.stride(2),
+        k.stride(3),
+        v.stride(0),
+        v.stride(1),
+        v.stride(2),
+        v.stride(3),
+        do.stride(0),
+        do.stride(1),
+        do.stride(2),
+        do.stride(3),
+        dq.stride(0),
+        dq.stride(1),
+        dq.stride(2),
+        dq.stride(3),
+        mask.stride(0),
+        mask.stride(1),
+        mask_packed.stride(0),
+        mask_packed.stride(1),
         col_indices_dq.stride(0),
-        H, N, B * H,
-        BLOCK_M=dq_bm, BLOCK_N=dq_bn, HEAD_DIM=D,
+        H,
+        N,
+        B * H,
+        BLOCK_M=dq_bm,
+        BLOCK_N=dq_bn,
+        HEAD_DIM=D,
         USE_PACKED=USE_PACKED,
         PRECISE=precise,
         APPROX_SOFTMAX=approximate_softmax,
@@ -1353,8 +1598,15 @@ class _BinFlashFunction(torch.autograd.Function):
         D = q.shape[-1]
         preproc = _autograd_preproc(mask, D)
         o, lse = _binflash_fwd_with_lse(
-            q, k, v, mask, sm_scale, preproc=preproc, precise=precise,
-            approximate_softmax=approximate_softmax, softmax_threshold=softmax_threshold,
+            q,
+            k,
+            v,
+            mask,
+            sm_scale,
+            preproc=preproc,
+            precise=precise,
+            approximate_softmax=approximate_softmax,
+            softmax_threshold=softmax_threshold,
         )
         ctx.save_for_backward(q, k, v, o, lse, mask)
         ctx.sm_scale = sm_scale
@@ -1369,7 +1621,16 @@ class _BinFlashFunction(torch.autograd.Function):
         D = q.shape[-1]
         preproc = _autograd_preproc(mask, D)
         dq, dk, dv = _binflash_bwd(
-            do, q, k, v, o, lse, mask, ctx.sm_scale, preproc=preproc, precise=ctx.precise,
+            do,
+            q,
+            k,
+            v,
+            o,
+            lse,
+            mask,
+            ctx.sm_scale,
+            preproc=preproc,
+            precise=ctx.precise,
             approximate_softmax=ctx.approximate_softmax,
             softmax_threshold=ctx.softmax_threshold,
         )
@@ -1377,8 +1638,14 @@ class _BinFlashFunction(torch.autograd.Function):
 
 
 def binflash_attention(
-    q, k, v, mask, sm_scale=None, precise=False,
-    approximate_softmax=False, softmax_threshold=1e-4,
+    q,
+    k,
+    v,
+    mask,
+    sm_scale=None,
+    precise=False,
+    approximate_softmax=False,
+    softmax_threshold=1e-4,
 ):
     """Block-mask flash attention with autograd support.
 
@@ -1416,5 +1683,12 @@ def binflash_attention(
     the mask). Use inside ``torch.no_grad()`` for inference to skip ctx saves.
     """
     return _BinFlashFunction.apply(
-        q, k, v, mask, sm_scale, precise, approximate_softmax, softmax_threshold,
+        q,
+        k,
+        v,
+        mask,
+        sm_scale,
+        precise,
+        approximate_softmax,
+        softmax_threshold,
     )

@@ -1,21 +1,21 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68", "wheel"]
 
 [project]
-name = "binflash"
-version = "0.1.0"
-description = "Flash attention with binary block-mask skipping for sparse attention patterns."
-readme = "README.md"
-license = { text = "MIT" }
 authors = [
-  { name = "Jonas Geiping", email = "jonas@tue.ellis.eu" },
+  {name = "Jonas Geiping", email = "jonas@tue.ellis.eu"},
 ]
-requires-python = ">=3.10"
 dependencies = [
   "torch>=2.4",
   "triton>=3.0",
 ]
+description = "Flash attention with binary block-mask skipping for sparse attention patterns."
+license = {text = "MIT"}
+name = "binflash"
+readme = "README.md"
+requires-python = ">=3.10"
+version = "0.1.0"
 
 [project.optional-dependencies]
 benchmark = [
@@ -26,11 +26,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/JonasGeiping/binflash"
+Homepage = "https://github.com/seal-rg/binflash"
 
 [tool.setuptools.packages.find]
-include = ["binflash*"]
 exclude = ["tests*", "benchmarks*"]
+include = ["binflash*"]
 
 [tool.ruff]
 line-length = 140

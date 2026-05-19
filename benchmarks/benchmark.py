@@ -57,7 +57,6 @@ from binflash.masks import (  # noqa: E402
 )
 from binflash.reference import reference_attention  # noqa: E402
 
-
 # ─────────────────────── Mask factory ───────────────────────
 
 

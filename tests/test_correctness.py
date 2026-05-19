@@ -54,7 +54,11 @@ def run_test(mask_name: str, mask: torch.Tensor, B=2, H=4, N=None, D=64):
     for precise, approx in modes:
         with torch.no_grad():
             out = binflash_attention(
-                q, k, v, mask, sm_scale,
+                q,
+                k,
+                v,
+                mask,
+                sm_scale,
                 precise=precise,
                 approximate_softmax=approx,
                 softmax_threshold=1e-6,

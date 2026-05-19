@@ -58,7 +58,11 @@ def run_case(mask_name, mask, B, H, N, D):
         for t in (q, k, v):
             t.grad = None
         out = binflash_attention(
-            q, k, v, mask, sm_scale,
+            q,
+            k,
+            v,
+            mask,
+            sm_scale,
             precise=precise,
             approximate_softmax=approx,
             softmax_threshold=1e-6,
