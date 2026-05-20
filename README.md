@@ -1,8 +1,7 @@
 # BinFlash
 
 Flash attention with **binary block-mask skipping** for sparse attention
-patterns (causal, sliding window, block-diagonal, prefix LM, longformer,
-log-tree, document masks, etc.). Triton kernels with forward and backward
+patterns that can be described by binary masks. Triton kernels with forward and backward
 support; drop-in replacement for `F.scaled_dot_product_attention` in all situations where an `(N, N)` bool mask is given.
 
 Notably, the interface is strictly tensor-> tensor, there is no pre-compilation per mask required, it's just 
