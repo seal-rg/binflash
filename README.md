@@ -33,7 +33,7 @@ pip install -e ".[benchmark]"
 ```
 
 Requires Python ≥ 3.10, a CUDA GPU, PyTorch ≥ 2.4, Triton ≥ 3.0. Kernels
-target Ampere/Ada/Hopper. Tested primarily on Ada (RTX A600-ada).
+target Ampere/Ada/Hopper. Tested primarily on Ada (RTX A6000-ada).
 
 ## Use
 
